@@ -1,0 +1,40 @@
+﻿apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ipiece-backend
+  namespace: ipiece-backend-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ipiece-backend
+  template:
+    metadata:
+      labels:
+        app: ipiece-backend
+    spec:
+      containers:
+        - name: ipiece-backend
+          image: 235625001959.dkr.ecr.ap-northeast-2.amazonaws.com/ipiece-backend-test:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

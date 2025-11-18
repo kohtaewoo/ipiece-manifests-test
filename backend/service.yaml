@@ -1,0 +1,13 @@
+﻿apiVersion: v1
+kind: Service
+metadata:
+  name: ipiece-backend
+  namespace: ipiece-backend-test
+spec:
+  type: LoadBalancer
+  selector:
+    app: ipiece-backend
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
