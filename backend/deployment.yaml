@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: ipiece-backend
-          image: 235625001959.dkr.ecr.ap-northeast-2.amazonaws.com/ipiece-backend-test:latest
+          image: 235625001959.dkr.ecr.ap-northeast-2.amazonaws.com/ipiece-backend-test:a300f04745922116ff93180c1717ab481f784793
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
