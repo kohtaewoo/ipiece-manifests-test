@@ -1,30 +1,29 @@
-﻿# ipiece-manifests-test
+# 🚀 ipiece-manifests-test — EKS GitOps 자동 배포 연습 환경 정리
 
-0. 오늘 목표
+## 🎯 0. 오늘 목표
 
-Spring 백엔드 + Next.js 프론트를
+**Spring 백엔드 + Next.js 프론트를 GitOps 기반으로 EKS에 자동 배포하는 전체 파이프라인 구성**
 
-GitHub에 올리고
+전체 흐름:
 
-GitHub Actions로 ECR에 이미지 푸시하고
+1. 코드 GitHub push
+2. GitHub Actions → ECR 이미지 빌드 & 푸시
+3. `ipiece-manifests-test` 레포에 이미지 태그 자동 반영
+4. Argo CD가 이를 감지 → 자동 Sync
+5. EKS(`ipiece-eks-dev`)에 즉시 롤링 배포
+6. 외부에서 `api.ipiece.store`로 정상 접근
 
-ipiece-manifests-test 레포에 이미지 태그 자동 반영 →
+---
 
-Argo CD가 EKS(ipiece-eks-dev)에 자동 배포
+# 🟩 1. 백엔드 레포 준비 — `ipiece-backend-test`
 
-외부에선 api.ipiece.store로 접속
+## 1-1. Spring Boot 프로젝트
 
-까지 한 방에 이어지는 EKS GitOps 연습 환경 만드는 게 목표였음.
+**레포:** `ipiece-backend-test`
 
-1. 백엔드 레포 준비 (ipiece-backend-test)
-1-1. Spring Boot 프로젝트
+**패키지:** `edu.ce.fisa`
 
-레포: ipiece-backend-test
-
-패키지: edu.ce.fisa
-
-메인 클래스:
-
+```java
 @SpringBootApplication
 public class IpieceBackendTestApplication {
     public static void main(String[] args) {
@@ -32,9 +31,11 @@ public class IpieceBackendTestApplication {
     }
 }
 
+```
 
-헬스체크용 컨트롤러:
+### 헬스체크 컨트롤러
 
+```java
 @RestController
 public class HelloController {
 
@@ -49,11 +50,15 @@ public class HelloController {
     }
 }
 
+```
 
-로컬에서 mvn spring-boot:run + http://localhost:8080/healthz 확인해서 앱 동작 확인.
+---
 
-2. 백엔드 Docker + CI/CD (ECR 푸시 + GitOps 반영)
-2-1. Dockerfile 작성
+# 🟩 2. 백엔드 Docker + CI/CD (ECR 푸시 + GitOps 반영)
+
+## 2-1. Dockerfile
+
+```docker
 FROM eclipse-temurin:17-jdk AS build
 WORKDIR /app
 
@@ -73,27 +78,21 @@ COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 
+```
 
-이 이미지가 나중에 ECR ipiece-backend-test repo에 올라감.
+---
 
-2-2. GitHub Actions 워크플로 (.github/workflows/backend-ci.yml)
+## 2-2. GitHub Actions (`backend-ci.yml`)
 
-기능 요약
+동작 요약:
 
-main, develop에 푸시되면:
+- main/develop push 시
+    - Maven 테스트
+    - Docker build → ECR push
+    - manifests repo의 `deployment.yaml`에 이미지 태그 자동 업데이트
+    - Git push → ArgoCD 자동 Sync → EKS 롤링 배포
 
-Maven 테스트 실행
-
-Docker 빌드 후 ECR 푸시
-
-ipiece-manifests-test/backend/deployment.yaml 의 image: 라인 태그를 이번 커밋 SHA로 자동 변경
-
-변경사항을 commit & push
-
-Argo CD가 그걸 보고 자동 Sync → EKS 롤링 배포
-
-핵심 내용
-
+```yaml
 name: Backend CI/CD (ECR, Maven)
 
 on:
@@ -145,7 +144,6 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          echo "Registry: $ECR_REGISTRY"
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
@@ -171,17 +169,21 @@ jobs:
             git push
           fi
 
+```
 
-필요한 GitHub Secret:
+필수 Secrets:
 
-AWS_ACCESS_KEY_ID
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `MANIFESTS_REPO_TOKEN` (GitHub PAT)
 
-AWS_SECRET_ACCESS_KEY
+---
 
-MANIFESTS_REPO_TOKEN (PAT)
+# 🟦 3. 매니페스트 레포 (`ipiece-manifests-test`)
 
-3. 매니페스트 레포 (ipiece-manifests-test)
-3-1. backend 디렉토리 구조
+## 디렉토리 구조
+
+```
 ipiece-manifests-test/
 ├─ backend/
 │  ├─ namespace.yaml
@@ -190,13 +192,25 @@ ipiece-manifests-test/
 └─ argocd/
    └─ app-backend.yaml
 
-3-2. Namespace
+```
+
+---
+
+## 3-2. Namespace
+
+```yaml
 apiVersion: v1
 kind: Namespace
 metadata:
   name: ipiece-backend-test
 
-3-3. Deployment
+```
+
+---
+
+## 3-3. Deployment
+
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -214,7 +228,7 @@ spec:
     spec:
       containers:
         - name: ipiece-backend
-          image: 235625001959.dkr.ecr.ap-northeast-2.amazonaws.com/ipiece-backend-test:latest  # ← CI가 여기 태그 바꿔줌
+          image: 235625001959.dkr.ecr.ap-northeast-2.amazonaws.com/ipiece-backend-test:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -222,23 +236,18 @@ spec:
             httpGet:
               path: /healthz
               port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /healthz
               port: 8080
-            initialDelaySeconds: 15
-            periodSeconds: 20
-          resources:
-            requests:
-              cpu: "100m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
 
-3-4. Service (LoadBalancer)
+```
+
+---
+
+## 3-4. Service
+
+```yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -253,7 +262,13 @@ spec:
       targetPort: 8080
       protocol: TCP
 
-3-5. Argo CD Application (argocd/app-backend.yaml)
+```
+
+---
+
+## 3-5. Argo CD Application
+
+```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -275,160 +290,72 @@ spec:
     syncOptions:
       - CreateNamespace=true
 
+```
 
-kubectl apply -f argocd/app-backend.yaml 로 Application 생성
+적용:
 
-Argo UI에서:
+```bash
+kubectl apply -f argocd/app-backend.yaml
 
-Sync: Auto
+```
 
-ipiece-backend-test Namespace + Service + Deployment + Pod 트리 확인
+---
 
-4. EKS 클러스터 생성 (ipiece-eks-dev)
-4-1. 클러스터 설정
+# 🟨 4. EKS 클러스터 (`ipiece-eks-dev`)
 
-이름: ipiece-eks-dev
+- 리전: **ap-northeast-2**
+- Kubernetes: **1.34**
+- EKS 자율 모드 + EC2 Node Group 병행
+- 서브넷 태깅 필수:
 
-리전: ap-northeast-2
+### 퍼블릭 서브넷
 
-Kubernetes 버전: 1.34
-
-모드: 사용자 지정 구성 + EKS 자율 모드 ON (하지만 EC2 매니지드 노드 그룹도 사용)
-
-클러스터 IAM 역할: AmazonEKSAutoClusterRole
-
-노드 IAM 역할: AmazonEKSAutoNodeRole
-
-4-2. VPC 및 서브넷
-
-VPC: cloud-ha-lab-dev-vpc (vpc-087decd9f8cc89873)
-
-선택한 서브넷 (총 4개):
-
-Public
-
-subnet-00c5c2456be0a196c (10.0.0.0/24, apne2-az1)
-
-subnet-063df0312123ad09e (10.0.1.0/24, apne2-az3)
-
-Private
-
-subnet-0928730ce5368f9c2 (10.0.128.0/20, apne2-az1)
-
-subnet-0dad7a14279ae5f5b (10.0.144.0/20, apne2-az3)
-
-서브넷 태깅 (ELB 생성 오류 해결 포인트):
-
-Public 서브넷에:
-
+```
 kubernetes.io/role/elb = 1
 kubernetes.io/cluster/ipiece-eks-dev = shared
 
+```
 
-Private 서브넷에:
+### 프라이빗 서브넷
 
+```
 kubernetes.io/role/internal-elb = 1
 kubernetes.io/cluster/ipiece-eks-dev = shared
 
+```
 
-클러스터 엔드포인트: 퍼블릭 및 프라이빗 선택
-→ Vault01에서 바로 kubectl 가능 + 노드는 프라이빗으로 통신.
+---
 
-4-3. Node Group
+# 🟦 5. 배포 + ELB + DNS 연결
 
-관리형 노드 그룹 생성:
+ELB 생성 후:
 
-이름: (예: ipiece-ng-1)
+```bash
+curl http://<ELB-DNS>/healthz
 
-인스턴스 타입: t3.medium (예시)
+```
 
-원하는 개수: 2
+DNS CNAME:
 
-서브넷: Private 2개 선택
+```
+api → <ELB-DNS>
 
-클러스터 정상 기동 확인:
+```
 
-kubectl get nodes
-kubectl get pods -A
+접속:
 
+```
+http://api.ipiece.store/healthz
 
-aws-node, kube-proxy, coredns, eks-pod-identity-agent 등 Running 확인.
+```
 
-5. 백엔드 배포 + ELB + DNS 연결
-5-1. Argo CD로 배포
-kubectl apply -f argocd/app-backend.yaml
+---
 
-kubectl get applications.argoproj.io -n argocd
-# NAME                  SYNC STATUS   HEALTH STATUS
-# ipiece-backend-test   Synced        Healthy
+# 🟧 6. 프론트엔드 GitOps 파이프라인 (진행 중)
 
-kubectl get all -n ipiece-backend-test
-# pod/ipiece-backend-...
-# service/ipiece-backend  TYPE=LoadBalancer ...
+## Next.js Dockerfile
 
-5-2. ELB 생성 문제 → 해결
-
-처음 에러:
-
-Error syncing load balancer: failed to ensure load balancer:
-could not find any suitable subnets for creating the ELB
-
-
-원인:
-
-Public 서브넷에 Kubernetes용 태그가 없어 ELB가 붙을 수 없었음.
-
-해결:
-
-VPC Subnets에 태그 추가 (위에서 설명한 kubernetes.io/role/elb, kubernetes.io/cluster/...).
-
-이후 kubectl describe svc ipiece-backend 했을 때:
-
-Type: LoadBalancer
-External-IP: a76784d6daa354546813bc5306a59411-719697031.ap-northeast-2.elb.amazonaws.com
-
-
-Vault01에서 확인:
-
-curl http://a76784d6daa354546813bc5306a59411-719697031.ap-northeast-2.elb.amazonaws.com/healthz
-# ok
-
-
-ELB SG 인바운드도 80 포트 0.0.0.0/0 열어서 노트북에서도 접속 가능하게 설정.
-
-5-3. 도메인 연결 (api.ipiece.store)
-
-도메인: ipiece.store (가비아)
-
-Gabia DNS 관리에서 CNAME 추가:
-
-타입: CNAME
-
-호스트: api
-
-값/위치:
-a76784d6daa354546813bc5306a59411-719697031.ap-northeast-2.elb.amazonaws.com
-
-결과:
-
-http://api.ipiece.store/healthz → 백엔드 EKS 서비스까지 연결.
-
-6. 프론트엔드 파이프라인 준비 (진행 중)
-6-1. 프론트 레포
-
-레포: Woori-FISA-Go/IPiece-web
-
-브랜치 전략/컨벤션:
-
-이슈 생성: [#20] setting: 프론트엔드 CI/CD 파이프라인 구성
-
-브랜치: setting/#20
-
-커밋 메시지: [#20] setting: 프론트엔드 CI/CD 파이프라인 구성
-
-PR → develop → 머지
-
-6-2. Dockerfile
+```docker
 FROM node:20-alpine AS builder
 WORKDIR /app
 
@@ -451,101 +378,29 @@ COPY --from=builder /app ./
 EXPOSE 3000
 CMD ["pnpm", "start"]
 
-6-3. Frontend CI/CD 워크플로 (frontend-ci.yml)
-name: Frontend CI/CD (ECR, Next.js)
+```
 
-on:
-  push:
-    branches: [ main, develop ]
-  workflow_dispatch:
+## CI/CD (`frontend-ci.yml`)
 
-env:
-  AWS_REGION: ap-northeast-2
-  ECR_REPOSITORY: ipiece-frontend
+GitHub Actions로 빌드 → ECR 푸시 → manifests repo 이미지 태그 변경
 
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+(백엔드와 동일 구조)
 
-    steps:
-      - uses: actions/checkout@v4
+프론트는 현재 **DialogContent showCloseButton 타입 에러만 해결하면 바로 완성됨.**
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "pnpm"
+---
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-          run_install: false
+# 🟩 7. 오늘 결과 요약
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+### ✔ 백엔드 GitOps 전체 파이프라인 **완전 구축 완료**
 
-      - name: Run build
-        run: pnpm build
+- Spring 코드 → GitHub push
+- GitHub Actions → ECR → manifests 이미지 태그 업데이트
+- ArgoCD 자동 Sync
+- EKS 롤링 배포
+- DNS(API)까지 완전 연결됨
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+### ✔ 프론트엔드 GitOps
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, tag, and push image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-
-      - name: Update manifests repo with new frontend image tag
-        env:
-          GIT_TOKEN: ${{ secrets.MANIFESTS_REPO_TOKEN }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          git config --global user.email "ci@ipiece.local"
-          git config --global user.name "ipiece-ci"
-
-          git clone https://x-access-token:${GIT_TOKEN}@github.com/kohtaewoo/ipiece-manifests-test.git
-          cd ipiece-manifests-test/frontend
-
-          sed -i "s#image: 235625001959.dkr.ecr.ap-northeast-2.amazonaws.com/ipiece-frontend:.*#image: 235625001959.dkr.ecr.ap-northeast-2.amazonaws.com/ipiece-frontend:${IMAGE_TAG}#" deployment.yaml
-
-          if git diff --quiet; then
-            echo "No changes to commit in manifests repo."
-          else
-            git commit -am "chore: update frontend image to ${IMAGE_TAG}"
-            git push
-          fi
-
-
-지금 막혀 있는 부분:
-
-로컬 pnpm build 단계에서 타입 에러(showCloseButton)
-→ DialogContent에서 지원하지 않는 prop이라 한 줄 제거해야 함.
-
-이거 해결되면 프론트도 백엔드랑 똑같이:
-
-Git push → ECR 푸시 → manifests 이미지 태그 갱신 → ArgoCD 자동 배포 플로우 완성.
-
-7. 오늘 결과 한 줄 요약
-
-백엔드는 이미 완전한 GitOps 파이프라인 완성 ✅
-→ ipiece-backend-test 코드 수정 → GitHub Actions → ECR 푸시 → ipiece-manifests-test 자동 수정 → ArgoCD → EKS 롤링 배포 → api.ipiece.store에서 바로 확인 가능.
-
-프론트는:
-
-CI/CD + GitOps 골격은 다 만들었고
-
-Next.js 타입 에러만 해결하면 백엔드랑 똑같은 구조로 붙일 수 있는 상태.
+- 파이프라인 구조 완성
+- TypeScript 에러만 해결하면 백엔드와 동일하게 자동 배포 완료됨
